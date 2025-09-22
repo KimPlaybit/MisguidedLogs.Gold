@@ -15,9 +15,20 @@ public class BunnyCdnStorageLoader(BunnyCDNStorage bunnyCDNStorage)
     
     public async Task<T?> GetStorageObject<T>(string fullPath)
     {
-        var stream = await bunnyCDNStorage.DownloadObjectAsStreamAsync(fullPath);
-        await using var decompressStream = new GZipStream(stream, CompressionMode.Decompress);
-        return JsonSerializer.Deserialize<T>(decompressStream, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } }) ?? default;
+        try
+        {
+            var stream = await bunnyCDNStorage.DownloadObjectAsStreamAsync(fullPath);
+            await using var decompressStream = new GZipStream(stream, CompressionMode.Decompress);
+            return JsonSerializer.Deserialize<T>(decompressStream, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } }) ?? default;
+        }
+        catch (Exception e)
+        {
+            if (e.Message.Contains("404"))
+            {
+                return default(T);
+            }
+            throw;
+        }
     }
 
     public async Task<T?> TryGetStorageObject<T>(string fullPath)

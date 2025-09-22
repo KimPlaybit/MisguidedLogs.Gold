@@ -27,3 +27,5 @@ node_modules/
 *.log
 .DS_Store
 *.Development.json
+*/appsettings.json
+k8s/*

@@ -4,12 +4,9 @@ using System.Security.Claims;
 namespace MisguidedLogs.Gold.WarcraftLogs.Model;
 
 
-public record Zone(int Id)
-{
-    public string Name => Id is 2018 ? "Scarlet Enclave" : ""; // <--- Get name somehow ?
-}
+public record Zone(int Id, string Name);
 public record Boss(int Id, string Name, int ZoneId);
-public record Fight(string FightId, int BossId, DateTime StartTime, DateTime EndTime)
+public record Fight(string FightId, DateTime StartTime, DateTime EndTime)
 {
     public string ReportCode => FightId.Split("_")[1];
     public int BossId => int.Parse(FightId.Split("_")[0], CultureInfo.InvariantCulture);

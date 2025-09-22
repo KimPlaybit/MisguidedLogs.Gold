@@ -9,6 +9,9 @@ public record BossProbability(int BossId, int AmountOfPlayers, List<ClassProbabi
     public int AvgLastDpsValue { get; set; } = 0;
     public int AvgLastHpsValue { get; set; } = 0;
     public int AvgLastDmgTakenValue { get; set; } = 0;
+    public short AvgMeleeDmgTakenValue { get; set; } = 0;
+    public short AvgTotalDmgTakenByBossValue { get; set; } = 0;
+    public short AvgTotalDmgTakenValue { get; set; } = 0;
 
     [JsonIgnore]
     public BossProbabilityDto GetDto => new(BossId,

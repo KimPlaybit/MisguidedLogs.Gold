@@ -22,7 +22,12 @@ public class Probability(BunnyCdnStorageLoader loader, BunnyCdnServiceStorageUpl
                 var bossProbability = probability.Bosses.FirstOrDefault(x => x.BossId == assosiatedBoss.Id);
                 if (bossProbability is null)
                 {
-                    bossProbability = new BossProbability(assosiatedBoss.Id, 0, [], [], [], []);
+                    bossProbability = new BossProbability(assosiatedBoss.Id, 0, [], [], [], [])
+                    {
+                        AvgMeleeDmgTakenValue = 20,
+                        AvgTotalDmgTakenByBossValue = 10,
+                        AvgTotalDmgTakenValue = 10
+                    };
                     probability.Bosses.Add(bossProbability);
                 }
 
@@ -35,10 +40,12 @@ public class Probability(BunnyCdnStorageLoader loader, BunnyCdnServiceStorageUpl
                     continue;
                 }
 
-                var tanks = assiosiatedStats.Where(x => IsTank(x, assiosiatedStats, bossProbability.AvgLastDmgTakenValue)).ToList();
-                if (TryCalcAvg(tanks.Count, tanks.Select(x => x.TotalDamageTaken).Average(), bossProbability.AvgLastDmgTakenValue, bossProbability.Tanks.Sum(x => x.AmountOfPlayers), out var avgDmgTaken))
+                var tanks = assiosiatedStats.Where(x => IsTank(x, assiosiatedStats, bossProbability, assosiatedPlayers)).ToList();
+                if (TryCalcAvgTank(tanks, assiosiatedStats, bossProbability, out var avgDmgTaken))
                 {
-                    bossProbability.AvgLastDmgTakenValue = avgDmgTaken;
+                    bossProbability.AvgMeleeDmgTakenValue = avgDmgTaken!.AvgMeleeDmgTakenValue;
+                    bossProbability.AvgTotalDmgTakenByBossValue = avgDmgTaken.AvgTotalDmgTakenByBossValue;
+                    bossProbability.AvgTotalDmgTakenValue = avgDmgTaken.AvgTotalDmgTakenValue;
                 }
 
                 var damageDealers = assiosiatedStats.Where(x => IsDps(x, tanks)).ToList();
@@ -78,16 +85,16 @@ public class Probability(BunnyCdnStorageLoader loader, BunnyCdnServiceStorageUpl
                     UpdateProbability(boss.Hybrids, boss.AmountOfPlayers);
                 }
             }
-            //await probability.UploadResults(uploader);
+            await probability.UploadResults(uploader, clientStorageUploader);
         }
     }
 
-    private void AddRoles(List<PlayerStats> stats, int bossId, Role role)
+    private void AddRoles(List<PlayerStats> stats, int bossId, Role role)//
     {
-        stats.ForEach(x => AddPlayerCombination(role, x.Spec.Spec, (short)bossId, x.PlayerId, x.FightId));
+        stats.ForEach(x => AddPlayerCombination(role, x.Spec.Spec, bossId, x.PlayerId, x.FightId));
     }
 
-    private void AddPlayerCombination(Role role, TalentSpec spec, short bossId, string playerId, string fightId)
+    private void AddPlayerCombination(Role role, TalentSpec spec, int bossId, string playerId, string fightId)
     {
         try
         {
@@ -114,6 +121,54 @@ public class Probability(BunnyCdnStorageLoader loader, BunnyCdnServiceStorageUpl
 
         return false;
     }
+    private static bool TryCalcAvgTank(List<PlayerStats> playerStats, HashSet<PlayerStats> allStats, BossProbability bossProbability, out TankAvgValues? newAvgValue)
+    {
+        if (playerStats.Count is not 0)
+        {
+            var avgMelee = playerStats.Select(x => (float)x.MeleeDmgTaken / GetMeleeDmgTaken(x, allStats)).Average() * 100;
+            var avgDamageTaken = playerStats.Select(x => (float)x.TotalDamageTaken / GetTotalDmgTaken(x, allStats)).Average() * 100;
+            var avgTotalByBoss = playerStats.Select(x => (float)x.TotalDamageTakenByBoss / GetTotalDmgTakenByBoss(x, allStats)).Average() * 100;
+            if (bossProbability.Tanks.Sum(x => x.AmountOfPlayers) is 0)
+            {
+                newAvgValue = new TankAvgValues(
+                    (short)avgMelee,
+                    (short)avgTotalByBoss,
+                    (short)avgDamageTaken
+                    );
+                return true;
+            }
+            var lastAvgDmgTakenSum = (float)bossProbability.AvgLastDmgTakenValue * bossProbability.Tanks.Sum(x => x.AmountOfPlayers);
+            var lastAvgTotalByBoss = (float)bossProbability.AvgTotalDmgTakenByBossValue * bossProbability.Tanks.Sum(x => x.AmountOfPlayers);
+            var lastAvgMelee = (float)bossProbability.AvgMeleeDmgTakenValue * bossProbability.Tanks.Sum(x => x.AmountOfPlayers);
+
+            newAvgValue = new TankAvgValues(
+                (short)((lastAvgMelee + avgMelee) / (playerStats.Count + bossProbability.Tanks.Sum(x => x.AmountOfPlayers))),
+                (short)((lastAvgTotalByBoss + avgTotalByBoss) / (playerStats.Count + bossProbability.Tanks.Sum(x => x.AmountOfPlayers))),
+                (short)((lastAvgDmgTakenSum + avgDamageTaken) / (playerStats.Count + bossProbability.Tanks.Sum(x => x.AmountOfPlayers)))
+                );
+            return true;
+        }
+        newAvgValue = null;
+        return false;
+    }
+
+    private static long GetMeleeDmgTaken(PlayerStats stats, HashSet<PlayerStats> allStats)
+    {
+        var allAssiosiatedPlayers = allStats.Where(x => x.FightId == stats.FightId);
+        return allAssiosiatedPlayers.Sum(x => x.MeleeDmgTaken);
+    }
+    private static long GetTotalDmgTaken(PlayerStats stats, HashSet<PlayerStats> allStats)
+    {
+        var allAssiosiatedPlayers = allStats.Where(x => x.FightId == stats.FightId);
+        return allAssiosiatedPlayers.Sum(x => x.TotalDamageTaken);
+    }
+    private static long GetTotalDmgTakenByBoss(PlayerStats stats, HashSet<PlayerStats> allStats)
+    {
+        var allAssiosiatedPlayers = allStats.Where(x => x.FightId == stats.FightId);
+        return allAssiosiatedPlayers.Sum(x => x.TotalDamageTakenByBoss);
+    }
+
+    private record TankAvgValues(short AvgMeleeDmgTakenValue, short AvgTotalDmgTakenByBossValue, short AvgTotalDmgTakenValue);
 
     private static bool IsDps(PlayerStats toEvaluate, List<PlayerStats> tankList)
     {
@@ -151,26 +206,40 @@ public class Probability(BunnyCdnStorageLoader loader, BunnyCdnServiceStorageUpl
         return toEvaluate.Dps < 100 && toEvaluate.Hps > 100;
     }
 
-    private static bool IsTank(PlayerStats stats, HashSet<PlayerStats> allStats, int avgDmgTaken)
+    private static bool IsTank(PlayerStats stats, HashSet<PlayerStats> allStats, BossProbability bossProbability, HashSet<Player> players)
     {
-        var allAssiosiatedPlayers = allStats.Where(x => x.FightId == stats.FightId);
-        var totalMeleeDmgTaken = allAssiosiatedPlayers.Sum(x => x.MeleeDmgTaken);
-        var totalDmgTaken = allAssiosiatedPlayers.Sum(x => x.TotalDamageTaken);
-        var totalDmgTakenByBoss = allAssiosiatedPlayers.Sum(x => x.TotalDamageTakenByBoss);
-        if ((float)stats.MeleeDmgTaken / totalMeleeDmgTaken > 0.12f)
+        if (stats.Spec.Spec is TalentSpec.Protection or TalentSpec.Feral or TalentSpec.Hybrid or TalentSpec.Fury)
         {
-            return true;
+            if (players.FirstOrDefault(x => x.PlayerId == stats.PlayerId)?.Class is 
+                Class.Mage or 
+                Class.Warlock or
+                Class.Rogue or
+                Class.Shaman or
+                Class.Priest or
+                Class.Hunter or null)
+            {
+                return false;
+            }
+            var allAssiosiatedPlayers = allStats.Where(x => x.FightId == stats.FightId);
+            var totalMeleeDmgTaken = allAssiosiatedPlayers.Sum(x => x.MeleeDmgTaken);
+            var totalDmgTaken = allAssiosiatedPlayers.Sum(x => x.TotalDamageTaken);
+            var totalDmgTakenByBoss = allAssiosiatedPlayers.Sum(x => x.TotalDamageTakenByBoss);
+            if ((float)stats.MeleeDmgTaken / totalMeleeDmgTaken > (float)bossProbability.AvgMeleeDmgTakenValue / 100)
+            {
+                return true;
+            }
+
+            if ((float)stats.TotalDamageTakenByBoss / totalDmgTakenByBoss > (float)bossProbability.AvgTotalDmgTakenByBossValue / 100)
+            {
+                return true;
+            }
+
+            if ((float)stats.TotalDamageTaken / totalDmgTaken > (float)bossProbability.AvgTotalDmgTakenValue / 100)
+            {
+                return true;
+            }
         }
 
-        if ((float)stats.TotalDamageTakenByBoss / totalDmgTakenByBoss > 0.1f)
-        {
-            return true;
-        }
-
-        if ((float)stats.TotalDamageTaken / totalDmgTaken > 0.07f)
-        {
-            return true;
-        }
 
         return false;
     }
